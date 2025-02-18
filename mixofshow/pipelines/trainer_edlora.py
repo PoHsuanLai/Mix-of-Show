@@ -16,7 +16,6 @@ from mixofshow.models.edlora import (LoRALinearLayer, revise_edlora_unet_attenti
 from mixofshow.pipelines.pipeline_edlora import bind_concept_prompt
 from mixofshow.utils.ptp_util import AttentionStore
 
-
 class EDLoRATrainer(nn.Module):
     def __init__(
         self,
@@ -30,7 +29,8 @@ class EDLoRATrainer(nn.Module):
         reg_full_identity=True,  # True for thanos, False for real person (don't need to encode clothes)
         use_mask_loss=True,
         enable_xformers=False,
-        gradient_checkpoint=False
+        gradient_checkpoint=False,
+        replace_mapping=None,  # Add replace_mapping parameter
     ):
         super().__init__()
 
@@ -48,6 +48,9 @@ class EDLoRATrainer(nn.Module):
 
         # 2. Define train scheduler
         self.scheduler = DDPMScheduler.from_pretrained(pretrained_path, subfolder='scheduler')
+
+        # Store replace_mapping if provided
+        self.replace_mapping = replace_mapping
 
         # 3. define training cfg
         self.enable_edlora = enable_edlora
@@ -152,16 +155,35 @@ class EDLoRATrainer(nn.Module):
             initializer_tokens = initializer_tokens.split('+')
         assert len(new_concept_tokens) == len(initializer_tokens), 'concept token should match init token.'
 
+        # Initialize replace_mapping if provided in the dataset config
+        if hasattr(self, 'replace_mapping'):
+            new_concept_cfg['replace_mapping'] = self.replace_mapping
+
         for idx, (concept_name, init_token) in enumerate(zip(new_concept_tokens, initializer_tokens)):
             if enable_edlora:
                 num_new_embedding = 16
             else:
                 num_new_embedding = 1
             new_token_names = [f'<new{idx * num_new_embedding + layer_id}>' for layer_id in range(num_new_embedding)]
+            
+            # Check which tokens need to be added
+            tokens_to_add = []
+            token_ids = []
+            for token_name in new_token_names:
+                if token_name not in self.tokenizer.get_vocab():
+                    tokens_to_add.append(token_name)
+                token_ids.append(self.tokenizer.convert_tokens_to_ids(token_name))
+            
+            # Only add tokens that don't exist
+            if tokens_to_add:
+                num_added_tokens = self.tokenizer.add_tokens(tokens_to_add)
+                assert num_added_tokens == len(tokens_to_add), 'Failed to add tokens'
 
-            num_added_tokens = self.tokenizer.add_tokens(new_token_names)
-            assert num_added_tokens == len(new_token_names), 'some token is already in tokenizer'
-            new_token_ids = [self.tokenizer.convert_tokens_to_ids(token_name) for token_name in new_token_names]
+            # Ensure the dictionary has the correct keys
+            new_concept_cfg[concept_name] = {
+                'concept_token_names': new_token_names,  # Explicitly use 'concept_token_names'
+                'concept_token_ids': token_ids
+            }
 
             # init embedding
             self.text_encoder.resize_token_embeddings(len(self.tokenizer))
@@ -170,92 +192,126 @@ class EDLoRATrainer(nn.Module):
             if init_token.startswith('<rand'):
                 sigma_val = float(re.findall(r'<rand-(.*)>', init_token)[0])
                 init_feature = torch.randn_like(token_embeds[0]) * sigma_val
-                logger.info(f'{concept_name} ({min(new_token_ids)}-{max(new_token_ids)}) is random initialized by: {init_token}')
+                logger.info(f'{concept_name} ({min(token_ids)}-{max(token_ids)}) is random initialized by: {init_token}')
             else:
                 # Convert the initializer_token, placeholder_token to ids
                 init_token_ids = self.tokenizer.encode(init_token, add_special_tokens=False)
-                # print(token_ids)
                 # Check if initializer_token is a single token or a sequence of tokens
                 if len(init_token_ids) > 1 or init_token_ids[0] == 40497:
                     raise ValueError('The initializer token must be a single existing token.')
                 init_feature = token_embeds[init_token_ids]
-                logger.info(f'{concept_name} ({min(new_token_ids)}-{max(new_token_ids)}) is random initialized by existing token ({init_token}): {init_token_ids[0]}')
+                logger.info(f'{concept_name} ({min(token_ids)}-{max(token_ids)}) is random initialized by existing token ({init_token}): {init_token_ids[0]}')
 
-            for token_id in new_token_ids:
+            for token_id in token_ids:
                 token_embeds[token_id] = init_feature.clone()
-
-            new_concept_cfg.update({
-                concept_name: {
-                    'concept_token_ids': new_token_ids,
-                    'concept_token_names': new_token_names
-                }
-            })
 
         return new_concept_cfg
 
     def get_all_concept_token_ids(self):
         new_concept_token_ids = []
-        for _, new_token_cfg in self.new_concept_cfg.items():
-            new_concept_token_ids.extend(new_token_cfg['concept_token_ids'])
+        for key, new_token_cfg in self.new_concept_cfg.items():
+            if key != 'replace_mapping':  # Skip the replace_mapping entry
+                new_concept_token_ids.extend(new_token_cfg['concept_token_ids'])
         return new_concept_token_ids
 
     def forward(self, images, prompts, masks, img_masks):
         latents = self.vae.encode(images).latent_dist.sample()
         latents = latents * 0.18215
 
-        # Sample noise that we'll add to the latents
+        # Add noise
         noise = torch.randn_like(latents)
         if self.noise_offset is not None:
-            noise += self.noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
+            noise = noise + self.noise_offset * torch.randn(
+                (latents.shape[0], latents.shape[1], 1, 1),
+                device=latents.device
+            )
 
-        bsz = latents.shape[0]
-        # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.scheduler.config.num_train_timesteps, (bsz, ), device=latents.device)
-        timesteps = timesteps.long()
+        timesteps = torch.randint(
+            0, self.scheduler.config.num_train_timesteps,
+            (latents.shape[0],),
+            device=latents.device
+        ).long()
 
-        # Add noise to the latents according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
         noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
         if self.enable_edlora:
-            prompts = bind_concept_prompt(prompts, new_concept_cfg=self.new_concept_cfg)  # edlora
+            # Process prompts for ED-LoRA
+            if isinstance(prompts, list):
+                processed_prompts = []
+                for prompt in prompts:
+                    if '<TOK1>' in prompt or '<TOK2>' in prompt:
+                        for concept_name, concept_cfg in self.new_concept_cfg.items():
+                            if concept_name != 'replace_mapping':
+                                if '<TOK1>' in prompt:
+                                    prompt = prompt.replace('<TOK1>', concept_name)
+                                    break
+                        for concept_name, concept_cfg in self.new_concept_cfg.items():
+                            if concept_name != 'replace_mapping':
+                                if '<TOK2>' in prompt:
+                                    prompt = prompt.replace('<TOK2>', concept_name)
+                                    break
+                    processed_prompts.append(prompt)
+                prompts = processed_prompts
+            prompts = bind_concept_prompt(prompts, new_concept_cfg=self.new_concept_cfg)
 
-        # get text ids
-        text_input_ids = self.tokenizer(
+        # Get text embeddings
+        text_inputs = self.tokenizer(
             prompts,
-            padding='max_length',
+            padding="max_length",
             max_length=self.tokenizer.model_max_length,
             truncation=True,
-            return_tensors='pt').input_ids.to(latents.device)
+            return_tensors="pt",
+        ).to(latents.device)
+        
+        # Get text encoder features
+        text_encoder_output = self.text_encoder(text_inputs.input_ids)[0]
 
-        # Get the text embedding for conditioning
-        encoder_hidden_states = self.text_encoder(text_input_ids)[0]
+        # Get encoder hidden states and predict noise
+        encoder_hidden_states = text_encoder_output
+        
         if self.enable_edlora:
-            encoder_hidden_states = rearrange(encoder_hidden_states, '(b n) m c -> b n m c', b=latents.shape[0])  # edlora
+            encoder_hidden_states = rearrange(encoder_hidden_states, '(b n) m c -> b n m c', b=latents.shape[0])
 
-        # Predict the noise residual
-        model_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        model_pred = self.unet(
+            noisy_latents,
+            timesteps,
+            encoder_hidden_states
+        ).sample
 
-        # Get the target for loss depending on the prediction type
-        if self.scheduler.config.prediction_type == 'epsilon':
+        # Calculate main loss
+        if self.scheduler.config.prediction_type == "epsilon":
             target = noise
-        elif self.scheduler.config.prediction_type == 'v_prediction':
+        elif self.scheduler.config.prediction_type == "v_prediction":
             target = self.scheduler.get_velocity(latents, noise, timesteps)
-        else:
-            raise ValueError(f'Unknown prediction type {self.scheduler.config.prediction_type}')
 
         if self.use_mask_loss:
             loss_mask = masks
         else:
             loss_mask = img_masks
-        loss = F.mse_loss(model_pred.float(), target.float(), reduction='none')
-        loss = ((loss * loss_mask).sum([1, 2, 3]) / loss_mask.sum([1, 2, 3])).mean()
 
+        # Calculate MSE loss with masks
+        loss = F.mse_loss(model_pred.float(), target.float(), reduction='none')
+        
+        # Apply mask and calculate mean
+        masked_loss = torch.mul(loss, loss_mask)
+        masked_loss_sum = torch.sum(masked_loss, dim=[1, 2, 3])
+        mask_sum = torch.sum(loss_mask, dim=[1, 2, 3])
+        
+        # Add small epsilon to prevent division by zero
+        eps = 1e-8
+        mask_sum = torch.clamp(mask_sum, min=eps)
+        
+        loss = torch.div(masked_loss_sum, mask_sum)
+        loss = torch.mean(loss)
+
+        # Calculate attention regularization loss if needed
         if self.attn_reg_weight is not None:
-            attention_maps = self.controller.get_average_attention()
-            attention_loss = self.cal_attn_reg(attention_maps, masks, text_input_ids)
-            if not torch.isnan(attention_loss):  # full mask
-                loss = loss + attention_loss
+            attention_maps = self.controller.step_store
+            attention_loss = self.cal_attn_reg(attention_maps, masks, text_inputs.input_ids)
+            if isinstance(attention_loss, (float, int)):
+                attention_loss = torch.tensor(attention_loss, device=loss.device, dtype=loss.dtype)
+            if attention_loss != 0:
+                loss = torch.add(loss, attention_loss)
             self.controller.reset()
 
         return loss
@@ -263,53 +319,108 @@ class EDLoRATrainer(nn.Module):
     def cal_attn_reg(self, attention_maps, masks, text_input_ids):
         '''
         attention_maps: {down_cross:[], mid_cross:[], up_cross:[]}
-        masks: torch.Size([1, 1, 64, 64])
+        masks: torch.Size([1, 1, 64, 64]) for single concept, dict for joint training
         text_input_ids: torch.Size([16, 77])
         '''
         # step 1: find token position
-        batch_size = masks.shape[0]
+        batch_size = masks.shape[0] if not isinstance(masks, dict) else len(masks)
         text_input_ids = rearrange(text_input_ids, '(b l) n -> b l n', b=batch_size)
-        # print(masks.shape) # torch.Size([2, 1, 64, 64])
-        # print(text_input_ids.shape) # torch.Size([2, 16, 77])
-
+        
+        # Get device from masks (either directly or from dictionary)
+        device = masks.device if not isinstance(masks, dict) else next(iter(masks.values())).device
+        
         new_token_pos = []
         all_concept_token_ids = self.get_all_concept_token_ids()
+        
+        # For single concept case, convert mask to proper format
+        if not isinstance(masks, dict):
+            # Check if masks are all zeros before proceeding
+            if torch.all(masks == 0):
+                return torch.tensor(0.0, device=device)
+            
+            # Convert single mask to dict format with two entries (for subject and adjective)
+            masks = {
+                'subject': masks.squeeze(1).clone(),  # Remove channel dimension and clone
+                'adjective': masks.squeeze(1).clone()  # Same mask for both
+            }
+            
         for text in text_input_ids:
-            text = text[0]  # even multi-layer embedding, we extract the first one
-            new_token_pos.append([idx for idx in range(len(text)) if text[idx] in all_concept_token_ids])
-
+            # For each batch, find positions of concept tokens in each layer
+            layer_positions = []
+            for layer_idx, layer_text in enumerate(text):  # Iterate through each layer's text
+                layer_pos = [idx for idx in range(len(layer_text)) if layer_text[idx] in all_concept_token_ids]
+                if layer_pos:  # If we found concept tokens in this layer
+                    layer_positions = layer_pos
+                    break  # Use the first layer where we find concept tokens
+            
+            if not layer_positions:  # If no concept tokens found in any layer
+                # Instead of defaulting to [0, 1], return 0 loss
+                return torch.tensor(0.0, device=device)
+            
+            # For single concept case, ensure we have at least two positions
+            if len(layer_positions) == 1:
+                layer_positions = [layer_positions[0], layer_positions[0]]  # Use same position twice
+            elif len(layer_positions) > 2:
+                layer_positions = layer_positions[:2]  # Take first two positions
+                
+            new_token_pos.append(layer_positions)
+            
         # step2: aggregate attention maps with resolution and concat heads
         attention_groups = {'64': [], '32': [], '16': [], '8': []}
-        for _, attention_list in attention_maps.items():
-            for attn in attention_list:
+        for attn_name, attention_list in attention_maps.items():
+            for attn_idx, attn in enumerate(attention_list):
+                if isinstance(attn, list):
+                    # Skip if attention map is a list (this can happen with certain attention types)
+                    continue
                 res = int(math.sqrt(attn.shape[1]))
                 cross_map = attn.reshape(batch_size, -1, res, res, attn.shape[-1])
-                attention_groups[str(res)].append(cross_map)
-
-        for k, cross_map in attention_groups.items():
-            cross_map = torch.cat(cross_map, dim=-4)  # concat heads
-            cross_map = cross_map.sum(-4) / cross_map.shape[-4]  # e.g., 64 torch.Size([2, 64, 64, 77])
-            cross_map = torch.stack([batch_map[..., batch_pos] for batch_pos, batch_map in zip(new_token_pos, cross_map)])  # torch.Size([2, 64, 64, 2])
-            attention_groups[k] = cross_map
-
-        attn_reg_total = 0
-        # step3: calculate loss for each resolution: <new1> <new2> -> <new1> is to penalize outside mask, <new2> to align with mask
-        for k, cross_map in attention_groups.items():
-            map_adjective, map_subject = cross_map[..., 0], cross_map[..., 1]
-
-            map_subject = map_subject / map_subject.max()
-            map_adjective = map_adjective / map_adjective.max()
-
-            gt_mask = F.interpolate(masks, size=map_subject.shape[1:], mode='nearest').squeeze(1)
-
-            if self.reg_full_identity:
-                loss_subject = F.mse_loss(map_subject.float(), gt_mask.float(), reduction='mean')
-            else:
-                loss_subject = map_subject[gt_mask == 0].mean()
-
-            loss_adjective = map_adjective[gt_mask == 0].mean()
-
-            attn_reg_total += self.attn_reg_weight * (loss_subject + loss_adjective)
+                attention_groups[str(res)].append(cross_map.clone())  # Clone to avoid in-place modifications
+        
+        # Process each resolution group
+        processed_groups = {}
+        for k, maps in attention_groups.items():
+            if not maps:  # Skip if no maps at this resolution
+                continue
+            try:
+                cross_map = torch.cat(maps, dim=-4)  # concat heads
+                cross_map = torch.div(torch.sum(cross_map, dim=-4), cross_map.shape[-4])  # average across heads
+                cross_map = torch.stack([batch_map[..., batch_pos].clone() for batch_pos, batch_map in zip(new_token_pos, cross_map)])
+                processed_groups[k] = cross_map
+            except Exception as e:
+                continue
+            
+        attn_reg_total = torch.tensor(0.0, device=device)
+        # step3: calculate loss for each resolution
+        for k, cross_map in processed_groups.items():
+            if cross_map.shape[-1] >= 2:  # Only process if we have at least 2 attention maps
+                map_adjective = cross_map[..., 0].clone()
+                map_subject = cross_map[..., 1].clone()
+                
+                # Normalize maps with epsilon to prevent division by zero
+                eps = 1e-6
+                map_subject_max = torch.clamp(map_subject.max(), min=eps)
+                map_adjective_max = torch.clamp(map_adjective.max(), min=eps)
+                map_subject = torch.div(map_subject, map_subject_max)
+                map_adjective = torch.div(map_adjective, map_adjective_max)
+                
+                # For single concept case, use the same mask for both maps
+                if isinstance(masks, dict) and len(masks) == 1:
+                    gt_mask = F.interpolate(masks['subject'].unsqueeze(1), size=map_subject.shape[1:], mode='nearest').squeeze(1)
+                else:
+                    gt_mask = F.interpolate(masks['subject'].unsqueeze(1), size=map_subject.shape[1:], mode='nearest').squeeze(1)
+                
+                # Add epsilon to denominators to prevent division by zero
+                if self.reg_full_identity:
+                    loss_subject = F.mse_loss(map_subject.float(), gt_mask.float(), reduction='mean')
+                else:
+                    non_mask_pixels = torch.clamp(torch.sum((gt_mask == 0).float()), min=eps)
+                    loss_subject = torch.div(torch.sum(map_subject * (gt_mask == 0).float()), non_mask_pixels)
+                
+                non_mask_pixels = torch.clamp(torch.sum((gt_mask == 0).float()), min=eps)
+                loss_adjective = torch.div(torch.sum(map_adjective * (gt_mask == 0).float()), non_mask_pixels)
+                
+                attn_reg_total = torch.add(attn_reg_total, torch.mul(self.attn_reg_weight, loss_subject + loss_adjective))
+        
         return attn_reg_total
 
     def load_delta_state_dict(self, delta_state_dict):
@@ -364,17 +475,18 @@ class EDLoRATrainer(nn.Module):
 
         # save_embedding
         for concept_name, concept_cfg in self.new_concept_cfg.items():
-            learned_embeds = self.text_encoder.get_input_embeddings().weight[concept_cfg['concept_token_ids']]
-            delta_dict['new_concept_embedding'][concept_name] = learned_embeds.detach().cpu()
+            if concept_name != 'replace_mapping':  # Skip the replace_mapping entry
+                learned_embeds = self.text_encoder.get_input_embeddings().weight[concept_cfg['concept_token_ids']]
+                delta_dict['new_concept_embedding'][concept_name] = learned_embeds.detach().cpu()
 
         # save text model
-        for lora_module in self.text_encoder_lora:
-            for name, param, in lora_module.named_parameters():
-                delta_dict['text_encoder'][f'{lora_module.name}.{name}'] = param.cpu().clone()
+        if hasattr(self, 'text_encoder_lora'):
+            for lora_module in self.text_encoder_lora:
+                for name, param in lora_module.named_parameters():
+                    delta_dict['text_encoder'][f'{lora_module.name}.{name}'] = param.detach().cpu()
 
-        # save unet model
-        for lora_module in self.unet_lora:
-            for name, param, in lora_module.named_parameters():
-                delta_dict['unet'][f'{lora_module.name}.{name}'] = param.cpu().clone()
-
-        return delta_dict
+        # save unet
+        if hasattr(self, 'unet_lora'):
+            for lora_module in self.unet_lora:
+                for name, param in lora_module.named_parameters():
+                    delta_dict['unet'][f'{lora_module.name}.{name}'] = param.detach().cpu()

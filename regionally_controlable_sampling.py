@@ -76,6 +76,7 @@ def prepare_text(prompt, region_prompts, height, width):
     region_collection = []
 
     regions = region_prompts.split('|')
+    print(f"\nProcessing regions with height={height}, width={width}")
 
     for region in regions:
         if region == '':
@@ -84,11 +85,18 @@ def prepare_text(prompt, region_prompts, height, width):
         prompt_region = prompt_region.replace('[', '').replace(']', '')
         neg_prompt_region = neg_prompt_region.replace('[', '').replace(']', '')
         pos = eval(pos)
+        print(f"\nRegion prompt: {prompt_region}")
+        print(f"Original position: {pos}")
+        
         if len(pos) == 0:
             pos = [0, 0, 1, 1]
+            print(f"Using default position: {pos}")
         else:
-            pos[0], pos[2] = pos[0] / height, pos[2] / height
-            pos[1], pos[3] = pos[1] / width, pos[3] / width
+            # The coordinates are already in pixel space (0 to height/width)
+            # We need to normalize them to 0-1 range
+            pos[0], pos[2] = pos[0] / height, pos[2] / height  # y coordinates
+            pos[1], pos[3] = pos[1] / width, pos[3] / width    # x coordinates
+            print(f"Normalized position: {pos}")
 
         region_collection.append((prompt_region, neg_prompt_region, pos))
     return (prompt, region_collection)
@@ -120,14 +128,34 @@ if __name__ == '__main__':
 
     if args.sketch_condition is not None and os.path.exists(args.sketch_condition):
         sketch_condition = Image.open(args.sketch_condition).convert('L')
-        width_sketch, height_sketch = sketch_condition.size
-        print('use sketch condition')
+        # Get original dimensions
+        orig_width, orig_height = sketch_condition.size
+        print(f'Original sketch size: {orig_width}x{orig_height}')
+        
+        # If the sketch is doubled width (1024x512), resize it to 512x512 for the model
+        if orig_width == 1024 and orig_height == 512:
+            print('Detected doubled width sketch, resizing to 512x512 for model input')
+            sketch_condition = sketch_condition.resize((512, 512), Image.Resampling.LANCZOS)
+            # Set the target width to 1024 to maintain doubled width in output
+            width_sketch, height_sketch = 1024, 512
+        else:
+            # For other cases, resize to 512x512
+            if sketch_condition.size != (512, 512):
+                print(f'Resizing sketch from {sketch_condition.size} to 512x512')
+                sketch_condition = sketch_condition.resize((512, 512), Image.Resampling.LANCZOS)
+            width_sketch, height_sketch = 512, 512
+        
+        print('Using sketch condition')
+        print(f'Target output dimensions: {width_sketch}x{height_sketch}')
     else:
         sketch_condition, width_sketch, height_sketch = None, 0, 0
         print('skip sketch condition')
 
     if args.keypose_condition is not None and os.path.exists(args.keypose_condition):
         keypose_condition = Image.open(args.keypose_condition).convert('RGB')
+        if keypose_condition.size != (width_sketch, height_sketch) and width_sketch != 0:
+            print(f'Resizing keypose from {keypose_condition.size} to {width_sketch}x{height_sketch}')
+            keypose_condition = keypose_condition.resize((width_sketch, height_sketch), Image.Resampling.LANCZOS)
         width_pose, height_pose = keypose_condition.size
         print('use pose condition')
     else:
@@ -137,7 +165,8 @@ if __name__ == '__main__':
     if width_sketch != 0 and width_pose != 0:
         assert width_sketch == width_pose and height_sketch == height_pose, 'conditions should be same size'
     width, height = max(width_pose, width_sketch), max(height_pose, height_sketch)
-
+    print(f'Using dimensions for region scaling: {width}x{height}')
+    
     kwargs = {
         'sketch_condition': sketch_condition,
         'keypose_condition': keypose_condition,

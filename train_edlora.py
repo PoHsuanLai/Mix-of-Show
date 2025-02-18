@@ -19,7 +19,7 @@ from mixofshow.pipelines.pipeline_edlora import EDLoRAPipeline, StableDiffusionP
 from mixofshow.pipelines.trainer_edlora import EDLoRATrainer
 from mixofshow.utils.convert_edlora_to_diffusers import convert_edlora
 from mixofshow.utils.util import MessageLogger, dict2str, reduce_loss_dict, set_path_logger
-from test_edlora import visual_validation
+from test_joint_edlora import visual_validation
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version('0.18.2')
@@ -195,4 +195,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     root_path = osp.abspath(osp.join(__file__, osp.pardir))
+
     train(root_path, args)

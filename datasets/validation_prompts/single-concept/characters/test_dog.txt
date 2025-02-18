@@ -1,0 +1,8 @@
+photo of a <TOK>
+<TOK>
+photo of a dog
+Ultra HD quality of <TOK> is walking on the street
+a <TOK>, wearing a collar and leash
+a <TOK> in front of eiffel tower
+a <TOK> is happily splashing in the swimming pool
+Ultra HD quality of a dog <TOK> is walking on the street

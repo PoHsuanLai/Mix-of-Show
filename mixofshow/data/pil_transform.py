@@ -10,19 +10,40 @@ import torchvision.transforms.functional as F
 from PIL import Image
 from torchvision.transforms import CenterCrop, Normalize, RandomCrop, RandomHorizontalFlip, Resize
 from torchvision.transforms.functional import InterpolationMode
-
+from torchvision import transforms
+from colorama import Fore
 from mixofshow.utils.registry import TRANSFORM_REGISTRY
 
 
-def build_transform(opt):
-    """Build performance evaluator from options.
-    Args:
-        opt (dict): Configuration.
-    """
-    opt = deepcopy(opt)
-    transform_type = opt.pop('type')
-    transform = TRANSFORM_REGISTRY.get(transform_type)(**opt)
-    return transform
+def build_transforms(opt_list):
+    """Build transforms from config list."""
+    transform_list = []
+    for opt in opt_list:
+        # Make a copy of the dict to avoid modifying the original
+        opt = opt.copy()
+        transform_type = opt.pop('type')
+        
+        # Import and instantiate the transform class
+        if hasattr(transforms, transform_type):
+            transform = getattr(transforms, transform_type)(**opt)
+        else:
+            # Try to get from local transforms
+            if transform_type == 'HumanResizeCropFinalV3':
+                transform = HumanResizeCropFinalV3(**opt)
+            elif transform_type == 'ToTensor':
+                transform = transforms.ToTensor()
+            elif transform_type == 'Normalize':
+                transform = transforms.Normalize(**opt)
+            elif transform_type == 'ShuffleCaption':
+                transform = ShuffleCaption(**opt)
+            elif transform_type == 'EnhanceText':
+                transform = EnhanceText(**opt)
+            else:
+                raise ValueError(f'Transform {transform_type} not found')
+                
+        transform_list.append(transform)
+    
+    return PairCompose(transform_list)
 
 
 TRANSFORM_REGISTRY.register(Normalize)
@@ -106,11 +127,19 @@ class PairCompose(nn.Module):
 
     def __call__(self, img, **kwargs):
         for t in self.transforms:
-            if len(inspect.signature(t.forward).parameters
-                   ) == 1:  # count how many args, not count self
+            # Check if transform is from torchvision
+            if isinstance(t, (transforms.ToTensor, transforms.Normalize)):
                 img = t(img)
             else:
-                img, kwargs = t(img, **kwargs)
+                try:
+                    result = t(img, **kwargs)
+                    if isinstance(result, tuple):
+                        img, kwargs = result
+                    else:
+                        img = result
+                except TypeError as e:
+                    # If transform doesn't accept kwargs, just apply it to the image
+                    img = t(img)
         return img, kwargs
 
     def __repr__(self) -> str:
@@ -124,69 +153,90 @@ class PairCompose(nn.Module):
 
 @TRANSFORM_REGISTRY.register()
 class HumanResizeCropFinalV3(nn.Module):
-    def __init__(self, size, crop_p=0.5):
+    def __init__(self, size=512, crop_p=0.5):
         super().__init__()
         self.size = size
         self.crop_p = crop_p
-        self.random_crop = RandomCrop(size=size)
-        self.paired_random_crop = PairRandomCrop(size=size)
 
-    def forward(self, img, **kwargs):
-        # step 1: short edge resize to 512
-        img = F.resize(img, size=self.size)
-        if 'mask' in kwargs:
-            kwargs['mask'] = F.resize(kwargs['mask'], size=self.size)
-
-        # step 2: random crop
-        width, height = img.size
-        if random.random() < self.crop_p:
-            if height > width:
-                crop_pos = random.randint(0, height - width)
-                img = F.crop(img, 0, 0, width + crop_pos, width)
-                if 'mask' in kwargs:
-                    kwargs['mask'] = F.crop(kwargs['mask'], 0, 0, width + crop_pos, width)
-            else:
-                if 'mask' in kwargs:
-                    img, kwargs = self.paired_random_crop(img, **kwargs)
-                else:
-                    img = self.random_crop(img)
+    def forward(self, img_dict, **kwargs):
+        """
+        Args:
+            img_dict: Dictionary containing 'image' and optionally 'mask'
+            **kwargs: Additional arguments
+        """
+        if isinstance(img_dict, dict):
+            img = img_dict['image']
+            mask = img_dict.get('mask', None)
         else:
-            img = img
+            img = img_dict
+            mask = kwargs.get('mask', None)
 
-        # step 3: long edge resize
-        img = F.resize(img, size=self.size - 1, max_size=self.size)
-        if 'mask' in kwargs:
-            kwargs['mask'] = F.resize(kwargs['mask'], size=self.size - 1, max_size=self.size)
+        # Process image
+        img = F.resize(img, size=self.size)
 
-        new_width, new_height = img.size
+        # Process mask if it exists
+        if mask is not None:
+            # print(Fore.CYAN + "Processing mask in transform..." + Fore.RESET)
+            if isinstance(mask, dict):
+                # Handle multiple masks for joint training
+                processed_masks = {}
+                for token, token_mask in mask.items():
+                    # print(Fore.YELLOW + f"Pre-transform mask for token {token}: min={token_mask.min().item():.4f}, max={token_mask.max().item():.4f}, sum={token_mask.sum().item():.4f}" + Fore.RESET)
+                    
+                    # Use nearest neighbor interpolation for masks
+                    resized_mask = F.resize(token_mask, size=self.size, interpolation=InterpolationMode.NEAREST)
+                    # print(Fore.YELLOW + f"After resize for token {token}: min={resized_mask.min().item():.4f}, max={resized_mask.max().item():.4f}, sum={resized_mask.sum().item():.4f}" + Fore.RESET)
+                    
+                    # Ensure binary values (already normalized to 0-1 from dataset)
+                    resized_mask = (resized_mask > 0.5).float()
+                    # print(Fore.YELLOW + f"After threshold for token {token}: min={resized_mask.min().item():.4f}, max={resized_mask.max().item():.4f}, sum={resized_mask.sum().item():.4f}" + Fore.RESET)
+                    
+                    # Check if mask has any non-zero values
+                    if resized_mask.sum() == 0:
+                        # print(Fore.RED + f"Warning: Resized mask for token {token} is all zeros" + Fore.RESET)
+                        continue
+                        
+                    # Try normalizing the mask to ensure we have proper values
+                    if resized_mask.max() > 0:
+                        resized_mask = resized_mask / resized_mask.max()
+                    # print(Fore.YELLOW + f"Final mask for token {token}: min={resized_mask.min().item():.4f}, max={resized_mask.max().item():.4f}, sum={resized_mask.sum().item():.4f}" + Fore.RESET)
+                    
+                    processed_masks[token] = resized_mask
+                mask = processed_masks if processed_masks else None
+            else:
+                # Handle single mask
+                # print(Fore.YELLOW + f"Pre-transform single mask: min={mask.min().item():.4f}, max={mask.max().item():.4f}, sum={mask.sum().item():.4f}" + Fore.RESET)
+                
+                # Use nearest neighbor interpolation for masks
+                mask = F.resize(mask, size=self.size, interpolation=InterpolationMode.NEAREST)
+                # print(Fore.YELLOW + f"After resize: min={mask.min().item():.4f}, max={mask.max().item():.4f}, sum={mask.sum().item():.4f}" + Fore.RESET)
+                
+                # Ensure binary values (already normalized to 0-1 from dataset)
+                mask = (mask > 0.5).float()
+                # print(Fore.YELLOW + f"After threshold: min={mask.min().item():.4f}, max={mask.max().item():.4f}, sum={mask.sum().item():.4f}" + Fore.RESET)
+                
+                # Check if mask has any non-zero values
+                if mask.sum() == 0:
+                    # print(Fore.RED + f"Warning: Resized mask is all zeros" + Fore.RESET)
+                    mask = None
+                else:
+                    # Try normalizing the mask to ensure we have proper values
+                    if mask.max() > 0:
+                        mask = mask / mask.max()
+                    # print(Fore.YELLOW + f"Final single mask: min={mask.min().item():.4f}, max={mask.max().item():.4f}, sum={mask.sum().item():.4f}" + Fore.RESET)
 
-        img = np.array(img)
-        if 'mask' in kwargs:
-            kwargs['mask'] = np.array(kwargs['mask']) / 255
+        # Update kwargs with processed mask
+        kwargs['mask'] = mask
+        
+        if isinstance(img_dict, dict):
+            img_dict['image'] = img
+            img_dict['mask'] = mask
+            return img_dict
+        else:
+            return img
 
-        start_y = random.randint(0, 512 - new_height)
-        start_x = random.randint(0, 512 - new_width)
-
-        res_img = np.zeros((self.size, self.size, 3), dtype=np.uint8)
-        res_mask = np.zeros((self.size, self.size))
-        res_img_mask = np.zeros((self.size, self.size))
-
-        res_img[start_y:start_y + new_height, start_x:start_x + new_width, :] = img
-        if 'mask' in kwargs:
-            res_mask[start_y:start_y + new_height, start_x:start_x + new_width] = kwargs['mask']
-            kwargs['mask'] = res_mask
-
-        res_img_mask[start_y:start_y + new_height, start_x:start_x + new_width] = 1
-        kwargs['img_mask'] = res_img_mask
-
-        img = Image.fromarray(res_img)
-
-        if 'mask' in kwargs:
-            kwargs['mask'] = cv2.resize(kwargs['mask'], (self.size // 8, self.size // 8), cv2.INTER_NEAREST)
-            kwargs['mask'] = torch.from_numpy(kwargs['mask'])
-        kwargs['img_mask'] = cv2.resize(kwargs['img_mask'], (self.size // 8, self.size // 8), cv2.INTER_NEAREST)
-        kwargs['img_mask'] = torch.from_numpy(kwargs['img_mask'])
-        return img, kwargs
+    def __call__(self, img, **kwargs):
+        return self.forward(img, **kwargs)
 
 
 @TRANSFORM_REGISTRY.register()
@@ -361,4 +411,15 @@ class EnhanceText(nn.Module):
     def forward(self, img, **kwargs):
         concept_token = kwargs['prompts'].strip()
         kwargs['prompts'] = random.choice(self.templates).format(concept_token)
+        return img, kwargs
+
+
+class TransformWrapper(nn.Module):
+    """Wrapper for torchvision transforms to handle kwargs."""
+    def __init__(self, transform):
+        super().__init__()
+        self.transform = transform
+    
+    def forward(self, img, **kwargs):
+        img = self.transform(img)
         return img, kwargs

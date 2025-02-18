@@ -19,13 +19,27 @@ def bind_concept_prompt(prompts, new_concept_cfg):
     if isinstance(prompts, str):
         prompts = [prompts]
     new_prompts = []
+    
+    # Check if replace_mapping exists
+    replace_mapping = new_concept_cfg.get('replace_mapping', {})
+    
     for prompt in prompts:
+        # First, do replace_mapping replacements
+        for tok, replacement in replace_mapping.items():
+            prompt = prompt.replace(tok, replacement)
+        
+        # Then do the concept token replacements
         prompt = [prompt] * 16
         for concept_name, new_token_cfg in new_concept_cfg.items():
+            # Skip the replace_mapping key
+            if concept_name == 'replace_mapping':
+                continue
             prompt = [
                 p.replace(concept_name, new_name) for p, new_name in zip(prompt, new_token_cfg['concept_token_names'])
             ]
         new_prompts.extend(prompt)
+    
+    # print(f'The new prompt is: {new_prompts}')
     return new_prompts
 
 

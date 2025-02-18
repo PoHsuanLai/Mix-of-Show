@@ -1,0 +1,41 @@
+name: joint_cat2_dog6_test
+manual_seed: 0
+mixed_precision: fp16
+
+path:
+  visualization: experiments/EDLoRA_cat2_dog6_joint/visualization
+  lora_path: experiments/EDLoRA_cat2_dog6_joint/models/edlora_model-latest.pth
+
+datasets:
+  val_vis:
+    name: PromptDataset
+    prompts:
+      - "A <TOK1> on the right and a <TOK2> on the left"
+      - "a photo of <TOK1> playing with <TOK2>"
+      - "a photo of <TOK1> and <TOK2> sleeping"
+      - "a photo of <TOK1> and <TOK2> looking at the camera"
+      - "a photo of <TOK1> and <TOK2> in a garden"
+      - "a photo of <TOK1> chasing <TOK2>"
+      - "a photo of <TOK1> and <TOK2> eating together"
+      - "a photo of <TOK1> and <TOK2> on a couch"
+      - "a photo of <TOK1> and <TOK2> in the snow"
+      - "a photo of <TOK1> and <TOK2> under a tree"
+    batch_size_per_gpu: 4
+    num_samples_per_prompt: 1
+    latent_size: [4, 64, 64]
+    replace_mapping:
+      <TOK1>: "<cat1> <cat2>"
+      <TOK2>: "<dogB1> <dogB2>"
+
+models:
+  enable_edlora: true
+  pretrained_path: experiments/pretrained_models/chilloutmix
+
+val:
+  val_during_save: true
+  compose_visualize: true
+  alpha_list: [0.7, 1.0]
+  region_control: true
+  sample:
+    num_inference_steps: 50
+    guidance_scale: 7.5

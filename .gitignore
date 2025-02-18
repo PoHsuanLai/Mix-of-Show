@@ -137,3 +137,33 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Large model files
+*.pth
+*.bin
+*.safetensors
+experiments/pretrained_models/
+experiments/EDLoRA_*/
+experiments/composed_edlora/
+
+# Data directories
+Data/
+datasets_old/
+datasets/my_data/
+
+# Git LFS files
+.git/lfs/
+
+# Temporary files
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Logs and checkpoints
+*.log
+checkpoint*/
+archived*/

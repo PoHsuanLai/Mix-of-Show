@@ -1,0 +1,8 @@
+a <TOK1> sitting on a chair
+a <TOK2> sitting on a chair
+a <TOK1> and a <TOK2> playing together
+a <TOK1> in a garden
+a <TOK2> in a garden
+a <TOK1> wearing a hat
+a <TOK2> wearing a hat
+a <TOK1> and a <TOK2> in front of a house 

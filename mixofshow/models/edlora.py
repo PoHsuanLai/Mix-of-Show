@@ -233,14 +233,23 @@ class LoRALinearLayer(nn.Module):
             self.lora_down = nn.Linear(in_features, rank, bias=False)
             self.lora_up = nn.Linear(rank, out_features, bias=False)
 
-        self.register_buffer('alpha', torch.tensor(alpha))
+        # Convert alpha to nn.Parameter
+        self.alpha = nn.Parameter(torch.tensor(alpha), requires_grad=False)
 
+        # Initialize weights
         torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
         torch.nn.init.zeros_(self.lora_up.weight)
 
+        # Store original forward
         self.original_forward = original_module.forward
         original_module.forward = self.forward
 
     def forward(self, hidden_states):
-        hidden_states = self.original_forward(hidden_states) + self.alpha * self.lora_up(self.lora_down(hidden_states))
-        return hidden_states
+        # Create new tensors for each path
+        lora_output = self.lora_up(self.lora_down(hidden_states))
+        original_output = self.original_forward(hidden_states)
+        
+        # Combine paths using addition
+        output = original_output + (lora_output * self.alpha)
+        
+        return output

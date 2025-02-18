@@ -1,0 +1,5 @@
+photo of a <TOK>
+<TOK>
+photo of a glasses
+a pair of <TOK> resting on a bookshelf  
+a pair of <TOK> perched on a nose

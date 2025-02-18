@@ -1,0 +1,11 @@
+pretrained_model: /home/frieren/r13921098/Mix-of-Show/experiments/EDLoRA_cat2_dog6_joint/models/checkpoint-100/combined_model_joint_concepts
+context_prompt: a photo of <cat1> <cat2> and <dogB1> <dogB2> eating together
+neg_context_prompt: longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality
+sketch_condition: /home/frieren/r13921098/Mix-of-Show/experiments/test/20241226_023625/PromptDataset/spatial_adaptor/2/spatial_mask_2.jpg
+sketch_adaptor_weight: 1.0
+region_sketch_adaptor_weight: 
+keypose_condition: 
+keypose_adaptor_weight: 0.0
+region_keypose_adaptor_weight: 
+random seed: 42
+prompt_rewrite: [a <cat1> <cat2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[0.34375, 0.0625, 0.857421875, 0.2099609375]|[a <dogB1> <dogB2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[0.265625, 0.2734375, 0.576171875, 0.3974609375]

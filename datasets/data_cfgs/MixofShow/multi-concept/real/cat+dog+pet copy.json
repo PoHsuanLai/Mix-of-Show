@@ -1,0 +1,26 @@
+[
+    {
+        "lora_path": "experiments/1111_EDLoRA_cat_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<cat1> <cat2>"
+    },
+    {
+        "lora_path": "experiments/1112_EDLoRA_dog_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<dogA1> <dogA2>"
+    },
+    {
+        "lora_path": "experiments/1112_EDLoRA_dog6_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<dogB1> <dogB2>"
+    },
+    {
+        "lora_path": "experiments/1112_EDLoRA_pet_cat1_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<pet_cat1> <pet_cat2>"
+    }
+]

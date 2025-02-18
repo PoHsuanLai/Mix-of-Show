@@ -35,18 +35,39 @@ class RegionT2I_AttnProcessor:
             exclusive_mask = torch.zeros((feat_height, feat_width))
             for region in region_list:
                 start_h, start_w, end_h, end_w = region[-1]
-                start_h, start_w, end_h, end_w = math.ceil(start_h * feat_height), math.ceil(
-                    start_w * feat_width), math.floor(end_h * feat_height), math.floor(end_w * feat_width)
-                exclusive_mask[start_h:end_h, start_w:end_w] += 1
+                print(f"Processing region with normalized coordinates: h=[{start_h}, {end_h}], w=[{start_w}, {end_w}]")
+                
+                # Convert normalized coordinates to feature map coordinates
+                start_h = math.floor(start_h * feat_height)
+                end_h = math.ceil(end_h * feat_height)
+                start_w = math.floor(start_w * feat_width)
+                end_w = math.ceil(end_w * feat_width)
+                
+                # Clamp values to valid range
+                start_h = max(0, min(start_h, feat_height - 1))
+                end_h = max(0, min(end_h, feat_height))
+                start_w = max(0, min(start_w, feat_width - 1))
+                end_w = max(0, min(end_w, feat_width))
+                
+                print(f"Mapped to feature map size ({feat_height}, {feat_width}): h=[{start_h}, {end_h}], w=[{start_w}, {end_w}]")
+                
+                if start_h < end_h and start_w < end_w:
+                    exclusive_mask[start_h:end_h, start_w:end_w] += 1
+            
+            print(f"Created region mask of size ({feat_height}, {feat_width})")
+            print(f"Non-zero elements in mask: {torch.sum(exclusive_mask > 0).item()}")
             return exclusive_mask
 
         dtype = query.dtype
         seq_lens = query.shape[1]
         downscale = math.sqrt(height * width / seq_lens)
+        print(f"Attention processing - Image size: ({height}, {width}), Sequence length: {seq_lens}, Downscale factor: {downscale}")
 
         # 0: context >=1: may be overlap
         feat_height, feat_width = int(height // downscale), int(width // downscale)
         region_mask = get_region_mask(region_list, feat_height, feat_width)
+        print(f"Created region mask of size ({feat_height}, {feat_width})")
+        print(f"Non-zero elements in mask: {torch.sum(region_mask > 0).item()}")
 
         query = rearrange(query, 'b (h w) c -> b h w c', h=feat_height, w=feat_width)
         hidden_states = rearrange(hidden_states, 'b (h w) c -> b h w c', h=feat_height, w=feat_width)
@@ -545,6 +566,31 @@ class RegionallyT2IAdapterPipeline(StableDiffusionAdapterPipeline):
             for k, v in enumerate(adapter_state):
                 adapter_state[k] = torch.cat([v] * 2, dim=0)
 
+        # Prepare latents for doubled width
+        if width > height:
+            # For doubled width, we'll use regular height but doubled width
+            latent_height = height // 8
+            latent_width = width // 8
+        else:
+            latent_height = height // 8
+            latent_width = width // 8
+
+        # Prepare latents
+        latents = self.prepare_latents(
+            batch_size * num_images_per_prompt,
+            num_channels_latents,
+            latent_height,  # Use calculated latent dimensions
+            latent_width,   # Use calculated latent dimensions
+            prompt_embeds.dtype,
+            device,
+            generator,
+            latents,
+        )
+
+        # Prepare extra step kwargs
+        extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
+
+        # Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):

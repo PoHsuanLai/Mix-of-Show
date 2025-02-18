@@ -1,0 +1,8 @@
+a photo of <TOK1> sitting next to <TOK2>
+a photo of <TOK1> and <TOK2> playing together
+a photo of <TOK1> looking at <TOK2>
+a photo of <TOK2> chasing <TOK1>
+a photo of <TOK1> and <TOK2> sleeping
+a photo of <TOK1> and <TOK2> in the garden
+a photo of <TOK2> following <TOK1>
+a photo of <TOK1> and <TOK2> on the couch

@@ -1,0 +1,11 @@
+pretrained_model: /home/frieren/r13921098/Mix-of-Show/experiments/EDLoRA_cat2_dog6_joint_archived_20241225_194014/models/checkpoint-100/combined_model_joint_concepts
+context_prompt: a photo of <cat1> <cat2> playing with <dogB1> <dogB2>
+neg_context_prompt: longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality
+sketch_condition: /home/frieren/r13921098/Mix-of-Show/experiments/test/20241226_002123/PromptDataset/spatial_adaptor/1/spatial_mask_1.jpg
+sketch_adaptor_weight: 1.0
+region_sketch_adaptor_weight: 
+keypose_condition: 
+keypose_adaptor_weight: 0.0
+region_keypose_adaptor_weight: 
+random seed: 42
+prompt_rewrite: [a <cat1> <cat2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[0, 0, 511, 447]|[a <dogB1> <dogB2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[208, 280, 479, 422]

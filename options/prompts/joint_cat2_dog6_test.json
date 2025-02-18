@@ -1,0 +1,15 @@
+{
+    "name": "joint_cat2_dog6_test",
+    "prompts": [
+        "a photo of <cat2> and <dogB6> sitting together",
+        "a photo of <cat2> playing with <dogB6>",
+        "a photo of <cat2> and <dogB6> sleeping",
+        "a photo of <cat2> and <dogB6> looking at the camera",
+        "a photo of <cat2> and <dogB6> in a garden",
+        "a photo of <cat2> chasing <dogB6>",
+        "a photo of <cat2> and <dogB6> eating together",
+        "a photo of <cat2> and <dogB6> on a couch",
+        "a photo of <cat2> and <dogB6> in the snow",
+        "a photo of <cat2> and <dogB6> under a tree"
+    ]
+} 

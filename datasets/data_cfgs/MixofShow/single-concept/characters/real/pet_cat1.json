@@ -1,0 +1,8 @@
+[
+    {
+        "instance_prompt": "<TOK>",
+        "instance_data_dir": "datasets/my_data/characters/real/pet_cat1/image",
+        "caption_dir": "datasets/my_data/characters/real/pet_cat1/caption",
+        "mask_dir": "datasets/my_data/characters/real/pet_cat1/mask"
+    }
+]

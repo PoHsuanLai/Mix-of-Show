@@ -1,0 +1,5 @@
+photo of a <TOK>
+<TOK>
+photo of a flower
+a <TOK> in a garden
+a <TOK> by the window

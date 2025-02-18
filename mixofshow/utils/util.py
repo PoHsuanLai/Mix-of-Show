@@ -67,7 +67,7 @@ def copy_opt_file(opt_file, experiments_root):
         f.writelines(lines)
 
 
-def set_path_logger(accelerator, root_path, config_path, opt, is_train=True):
+def set_path_logger(accelerator, root_path, config_path, opt, opt_path, is_train=True):
     opt['is_train'] = is_train
 
     if is_train:
@@ -90,12 +90,12 @@ def set_path_logger(accelerator, root_path, config_path, opt, is_train=True):
     accelerator.wait_for_everyone()
 
     if is_train:
-        copy_opt_file(config_path, opt['path']['experiments_root'])
+        copy_opt_file(opt_path, opt['path']['experiments_root'])
         log_file = osp.join(opt['path']['log'],
                             f"train_{opt['name']}_{get_time_str()}.log")
         set_logger(log_file)
     else:
-        copy_opt_file(config_path, opt['path']['results_root'])
+        copy_opt_file(opt_path, opt['path']['results_root'])
         log_file = osp.join(opt['path']['log'],
                             f"test_{opt['name']}_{get_time_str()}.log")
         set_logger(log_file)

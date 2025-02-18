@@ -1,0 +1,14 @@
+[
+    {
+        "lora_path": "experiments/1111_EDLoRA_cat_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<cat1> <cat2>"
+    },
+    {
+        "lora_path": "experiments/1112_EDLoRA_dog_Cmix_B4_Repeat500/models/edlora_model-latest.pth",
+        "unet_alpha": 1.0,
+        "text_encoder_alpha": 1.0,
+        "concept_name": "<dog1> <dog2>"
+    }
+]

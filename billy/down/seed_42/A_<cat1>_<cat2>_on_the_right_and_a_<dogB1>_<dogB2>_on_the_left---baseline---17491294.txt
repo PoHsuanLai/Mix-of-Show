@@ -1,0 +1,11 @@
+pretrained_model: /home/frieren/r12921062/Mix-of-Show/experiments/composed_edlora/chilloutmix/cat+dog/combined_model_base
+context_prompt: A <cat1> <cat2> on the right and a <dogB1> <dogB2> on the left
+neg_context_prompt: low quality, extra digit, cropped, worst quality, missing face, missing legs, missing eyes, animals in the background
+sketch_condition: /home/frieren/r12921062/Mix-of-Show/datasets/validation_spatial_condition/characters-objects/try5.jpg
+sketch_adaptor_weight: 1.0
+region_sketch_adaptor_weight: 
+keypose_condition: 
+keypose_adaptor_weight: 0.0
+region_keypose_adaptor_weight: 
+random seed: 42
+prompt_rewrite: [a <dogB1> <dogB2>, young corgi]-*-[low quality, extra digit, cropped, worst quality, missing face, missing legs, missing eyes, animals in the background]-*-[0, 90, 510, 485]|[a <cat1> <cat2>, gray cat]-*-[low quality, extra digit, cropped, worst quality, missing face, missing legs, missing eyes, animals in the background]-*-[0, 550, 510, 850]

@@ -45,6 +45,7 @@ def visual_validation(accelerator, pipe, dataloader, current_iter, opt):
             save_img_path = osp.join(opt['path']['visualization'], dataset_name, f'{current_iter}', f'{img_name}---{current_iter}.png')
 
             pil_imwrite(img, save_img_path)
+            print(f"Saved image to {save_img_path}")
         # tentative for out of GPU memory
         del output
         torch.cuda.empty_cache()

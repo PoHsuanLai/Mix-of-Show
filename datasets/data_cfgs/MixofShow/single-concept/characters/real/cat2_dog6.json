@@ -1,0 +1,12 @@
+[
+    {
+        "instance_prompt": "<TOK1> <TOK2>",
+        "instance_data_dir": "datasets/my_data/characters/real/cat2_dog6/image",
+        "caption_dir": "datasets/my_data/characters/real/cat2_dog6/caption",
+        "mask_dir": "datasets/my_data/characters/real/cat2_dog6/mask",
+        "mask_tokens": {
+            "<TOK1>": "1",
+            "<TOK2>": "2"
+        }
+    }
+]

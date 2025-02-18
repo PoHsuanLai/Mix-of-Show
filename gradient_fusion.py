@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from diffusers import DDPMScheduler, DPMSolverMultistepScheduler, StableDiffusionPipeline
 from tqdm import tqdm
+from colorama import Fore
 
 from mixofshow.models.edlora import revise_edlora_unet_attention_forward
 from mixofshow.pipelines.pipeline_edlora import bind_concept_prompt
@@ -811,6 +812,74 @@ def compose_concepts(concept_cfg, optimize_textenc_iters, optimize_unet_iters, p
     pipe.save_pretrained(checkpoint_save_path)
     with open(os.path.join(checkpoint_save_path, 'new_concept_cfg.json'), 'w') as json_file:
         json.dump(new_concept_cfg, json_file)
+
+
+def save_joint_trained_concepts(concept_list, pretrained_model_path, save_path, suffix, device='cuda'):
+    """
+    Save joint trained concepts by creating new tokens.
+    
+    Args:
+        concept_list (list): List of concept dictionaries with keys:
+            - 'lora_path': Path to the LoRA model
+            - 'concept_name': Concept tokens
+        pretrained_model_path (str): Path to the base pretrained model
+        save_path (str): Path to save the merged model
+        suffix (str): Suffix for the saved model
+        device (str, optional): Device to use. Defaults to 'cuda'.
+    """
+    logging.info('------Step 1: load stable diffusion checkpoint------')
+    pipe, train_scheduler, test_scheduler = init_stable_diffusion(pretrained_model_path, device)
+    tokenizer, text_encoder, unet, vae = pipe.tokenizer, pipe.text_encoder, pipe.unet, pipe.vae
+    
+    # Create a new concept configuration dictionary
+    new_concept_cfg = {}
+    
+    # Global counter for unique token names
+    global_token_counter = 0
+    
+    # Add new tokens for each concept
+    for concept in concept_list:
+        concept_names = concept['concept_name'].split(' ')
+        for concept_name in concept_names:
+            if concept_name.startswith('<'):
+                # Create 16 new tokens for this concept
+                new_token_names = [
+                    f'<new{global_token_counter + layer_id}>'
+                    for layer_id in range(16)
+                ]
+                
+                # Add these tokens to the tokenizer
+                num_added_tokens = tokenizer.add_tokens(new_token_names)
+                assert num_added_tokens == 16
+                
+                # Get token IDs for these new tokens
+                new_token_ids = [
+                    tokenizer.convert_tokens_to_ids(token_name)
+                    for token_name in new_token_names
+                ]
+
+                # Resize token embeddings
+                text_encoder.resize_token_embeddings(len(tokenizer))
+
+                # Store concept configuration
+                new_concept_cfg[concept_name] = {
+                    'concept_token_ids': new_token_ids,
+                    'concept_token_names': new_token_names
+                }
+                
+                # Increment global token counter
+                global_token_counter += 16
+    
+    # Save the pipeline with the new concept configuration
+    checkpoint_save_path = f'{save_path}/combined_model_{suffix}'
+    pipe.save_pretrained(checkpoint_save_path)
+    
+    # Save the new concept configuration
+    with open(os.path.join(checkpoint_save_path, 'new_concept_cfg.json'), 'w') as json_file:
+        json.dump(new_concept_cfg, json_file)
+    
+    print(Fore.GREEN + f'Saved joint trained model to {checkpoint_save_path}' + Fore.RESET)
+    logging.info(f'Saved joint trained model to {checkpoint_save_path}')
 
 
 def parse_args():

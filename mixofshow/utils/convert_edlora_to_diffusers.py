@@ -77,23 +77,74 @@ def merge_lora_into_weight(original_state_dict, lora_state_dict, model_type, alp
 
 
 def convert_edlora(pipe, state_dict, enable_edlora, alpha=0.6):
+    # Extensive debugging for state_dict
+    print("Debug: convert_edlora input state_dict type:", type(state_dict))
+    
+    # If state_dict is a tensor or has a keys method, print its keys
+    if hasattr(state_dict, 'keys'):
+        print("Debug: state_dict keys:", list(state_dict.keys()))
+    
+    # Handle cases where state_dict might be None or not have expected keys
+    if state_dict is None:
+        print("Warning: state_dict is None. Returning original pipeline.")
+        return pipe, {}
 
-    state_dict = state_dict['params'] if 'params' in state_dict.keys() else state_dict
+    # Try to handle different possible input formats
+    try:
+        # First, try to access 'params' key if it exists
+        if isinstance(state_dict, dict) and 'params' in state_dict:
+            state_dict = state_dict['params']
+        
+        # If state_dict is still None or empty, return
+        if not state_dict:
+            print("Warning: state_dict is empty after extraction.")
+            return pipe, {}
+
+        # Print keys after potential extraction
+        print("Debug: Extracted state_dict keys:", list(state_dict.keys()))
+    except Exception as e:
+        print(f"Error extracting state_dict: {e}")
+        return pipe, {}
+
+    # Initialize new_concept_cfg to an empty dictionary
+    new_concept_cfg = {}
 
     # step 1: load embedding
-    if 'new_concept_embedding' in state_dict and len(state_dict['new_concept_embedding']) != 0:
-        pipe, new_concept_cfg = load_new_concept(pipe, state_dict['new_concept_embedding'], enable_edlora)
+    # Add more detailed error handling and logging
+    try:
+        if 'new_concept_embedding' in state_dict and state_dict['new_concept_embedding']:
+            print("Debug: Found new_concept_embedding")
+            pipe, new_concept_cfg = load_new_concept(pipe, state_dict['new_concept_embedding'], enable_edlora)
+        else:
+            print("Warning: No new concept embedding found in state_dict.")
+            print("Debug: Available keys:", list(state_dict.keys()))
+    except Exception as e:
+        print(f"Error loading new concept embedding: {e}")
 
     # step 2: merge lora weight to unet
-    unet_lora_state_dict = state_dict['unet']
-    pretrained_unet_state_dict = pipe.unet.state_dict()
-    updated_unet_state_dict = merge_lora_into_weight(pretrained_unet_state_dict, unet_lora_state_dict, model_type='unet', alpha=alpha)
-    pipe.unet.load_state_dict(updated_unet_state_dict)
+    try:
+        if 'unet' in state_dict:
+            unet_lora_state_dict = state_dict['unet']
+            pretrained_unet_state_dict = pipe.unet.state_dict()
+            updated_unet_state_dict = merge_lora_into_weight(pretrained_unet_state_dict, unet_lora_state_dict, model_type='unet', alpha=alpha)
+            pipe.unet.load_state_dict(updated_unet_state_dict)
+        else:
+            print("Warning: No unet LoRA weights found in state_dict.")
+            print("Debug: Available keys:", list(state_dict.keys()))
+    except Exception as e:
+        print(f"Error merging unet LoRA weights: {e}")
 
     # step 3: merge lora weight to text_encoder
-    text_encoder_lora_state_dict = state_dict['text_encoder']
-    pretrained_text_encoder_state_dict = pipe.text_encoder.state_dict()
-    updated_text_encoder_state_dict = merge_lora_into_weight(pretrained_text_encoder_state_dict, text_encoder_lora_state_dict, model_type='text_encoder', alpha=alpha)
-    pipe.text_encoder.load_state_dict(updated_text_encoder_state_dict)
+    try:
+        if 'text_encoder' in state_dict:
+            text_encoder_lora_state_dict = state_dict['text_encoder']
+            pretrained_text_encoder_state_dict = pipe.text_encoder.state_dict()
+            updated_text_encoder_state_dict = merge_lora_into_weight(pretrained_text_encoder_state_dict, text_encoder_lora_state_dict, model_type='text_encoder', alpha=alpha)
+            pipe.text_encoder.load_state_dict(updated_text_encoder_state_dict)
+        else:
+            print("Warning: No text encoder LoRA weights found in state_dict.")
+            print("Debug: Available keys:", list(state_dict.keys()))
+    except Exception as e:
+        print(f"Error merging text encoder LoRA weights: {e}")
 
     return pipe, new_concept_cfg

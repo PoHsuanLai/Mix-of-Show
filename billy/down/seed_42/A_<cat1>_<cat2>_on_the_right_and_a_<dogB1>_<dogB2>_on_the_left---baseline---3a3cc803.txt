@@ -1,0 +1,11 @@
+pretrained_model: /home/frieren/r12921062/Mix-of-Show/experiments/composed_edlora/chilloutmix/cat+dog/combined_model_base
+context_prompt: A <cat1> <cat2> on the right and a <dogB1> <dogB2> on the left
+neg_context_prompt: longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality
+sketch_condition: /home/frieren/r13921098/Mix-of-Show/experiments/test/20241226_002851/PromptDataset/spatial_adaptor/0/spatial_mask_0.jpg
+sketch_adaptor_weight: 1.0
+region_sketch_adaptor_weight: 
+keypose_condition: 
+keypose_adaptor_weight: 0.0
+region_keypose_adaptor_weight: 
+random seed: 42
+prompt_rewrite: [a <cat1> <cat2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[24, 48, 503, 510]|[a <dogB1> <dogB2>, in the scene]-*-[longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality]-*-[16, 576, 495, 958]
